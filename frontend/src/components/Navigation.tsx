@@ -5,7 +5,8 @@ import {
   CreditCardIcon, 
   EyeIcon, 
   ChartBarIcon,
-  CloudArrowDownIcon
+  CloudArrowDownIcon,
+  BugAntIcon
 } from '@heroicons/react/24/outline';
 
 const navigation = [
@@ -14,6 +15,7 @@ const navigation = [
   { name: 'Views', href: '/views', icon: EyeIcon },
   { name: 'Analytics', href: '/analytics', icon: ChartBarIcon },
   { name: 'Sync Data', href: '/sync', icon: CloudArrowDownIcon },
+  { name: 'Test', href: '/test', icon: BugAntIcon },
 ];
 
 export const Sidebar: React.FC = () => {

@@ -22,7 +22,7 @@ export const Dashboard: React.FC = () => {
       const response = await dashboardAPI.getOverview();
       
       // Map backend response to expected frontend format
-      const backendData = response.data as any; // Backend returns different structure
+      const backendData = response.data.data as any; // Backend returns wrapped structure
       const mappedData: DashboardData = {
         totalValue: backendData.overview?.overallSummary?.totalCurrent || 0,
         totalInvestment: backendData.overview?.overallSummary?.totalInvested || 0,

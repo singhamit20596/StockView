@@ -11,7 +11,7 @@ export const Layout: React.FC = () => {
       <Sidebar />
       <MobileNav isOpen={mobileNavOpen} setIsOpen={setMobileNavOpen} />
       
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden md:ml-64">
         <div className="md:hidden">
           <div className="flex items-center justify-between bg-gray-800 px-4 py-3">
             <h1 className="text-xl font-bold text-white">StockView</h1>
@@ -26,7 +26,7 @@ export const Layout: React.FC = () => {
           </div>
         </div>
 
-        <main className="flex-1 relative overflow-y-auto focus:outline-none md:pl-64">
+        <main className="flex-1 relative overflow-y-auto focus:outline-none">
           <div className="py-6">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
               <Outlet />

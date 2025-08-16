@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { PlusIcon, PencilIcon, TrashIcon, CloudArrowDownIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, TrashIcon, CloudArrowDownIcon, BugAntIcon } from '@heroicons/react/24/outline';
 import { Button, Card, LoadingSpinner } from '../components/UI';
+import { CreateAccountWithScrapingSimple } from '../components/accounts/CreateAccountWithScrapingSimple';
+import { CreateAccountWithScrapingDebug } from '../components/accounts/CreateAccountWithScrapingDebug';
 import { accountsAPI } from '../services/api';
 import { Account } from '../types';
 
@@ -15,6 +17,8 @@ export const Accounts: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showScrapingForm, setShowScrapingForm] = useState(false);
+  const [showDebugForm, setShowDebugForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [formData, setFormData] = useState<AccountFormData>({
     name: '',
@@ -30,11 +34,13 @@ export const Accounts: React.FC = () => {
     try {
       setLoading(true);
       const response = await accountsAPI.getAll();
-      setAccounts(response.data);
+      // Backend returns {success: true, data: Account[], total: number}
+      setAccounts(response.data.data || []);
       setError(null);
     } catch (err) {
       setError('Failed to fetch accounts');
       console.error('Accounts error:', err);
+      setAccounts([]); // Set empty array as fallback
     } finally {
       setLoading(false);
     }
@@ -114,19 +120,59 @@ export const Accounts: React.FC = () => {
           <h1 className="text-3xl font-bold text-gray-900">Accounts</h1>
           <p className="mt-2 text-gray-600">Manage your broker accounts</p>
         </div>
-        <Button
-          onClick={() => setShowForm(true)}
-          className="inline-flex items-center"
-        >
-          <PlusIcon className="h-4 w-4 mr-2" />
-          Add Account
-        </Button>
+        <div className="flex space-x-2">
+          <Button
+            onClick={() => setShowScrapingForm(true)}
+            className="inline-flex items-center"
+          >
+            <CloudArrowDownIcon className="h-4 w-4 mr-2" />
+            Create Account
+          </Button>
+          <Button
+            onClick={() => setShowDebugForm(true)}
+            variant="secondary"
+            className="inline-flex items-center bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+          >
+            <BugAntIcon className="h-4 w-4 mr-2" />
+            Debug Scraping
+          </Button>
+          <Button
+            onClick={() => setShowForm(true)}
+            variant="secondary"
+            className="inline-flex items-center"
+          >
+            <PlusIcon className="h-4 w-4 mr-2" />
+            Add Manually
+          </Button>
+        </div>
       </div>
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
           <p className="text-red-600">{error}</p>
         </div>
+      )}
+
+      {/* Create Account with Scraping */}
+      {showScrapingForm && (
+        <CreateAccountWithScrapingSimple
+          onClose={() => setShowScrapingForm(false)}
+          onSuccess={() => {
+            setShowScrapingForm(false);
+            fetchAccounts();
+          }}
+        />
+      )}
+
+      {/* Debug Scraping Console */}
+      {showDebugForm && (
+        <CreateAccountWithScrapingDebug
+          onClose={() => setShowDebugForm(false)}
+          onSuccess={() => {
+            setShowDebugForm(false);
+            fetchAccounts();
+          }}
+        />
       )}
 
       {/* Account Form */}

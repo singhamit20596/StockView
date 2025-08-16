@@ -29,7 +29,7 @@ export const Sync: React.FC = () => {
   const fetchAccounts = async () => {
     try {
       const response = await accountsAPI.getAll();
-      setAccounts(response.data);
+      setAccounts(response.data.data || []);
     } catch (err) {
       console.error('Failed to fetch accounts:', err);
     }
@@ -38,8 +38,8 @@ export const Sync: React.FC = () => {
   const startScraping = async () => {
     try {
       setLoading(true);
-      const response = await scrapingAPI.startSession(syncData.broker);
-      setSession(response.data);
+      const response = await scrapingAPI.initiate(syncData.broker, syncData.accountId);
+      setSession(response.data.data);
     } catch (err) {
       console.error('Failed to start scraping session:', err);
     } finally {
@@ -52,11 +52,8 @@ export const Sync: React.FC = () => {
     
     try {
       setLoading(true);
-      const response = await scrapingAPI.login(session.id, {
-        username: syncData.username,
-        password: syncData.password,
-      });
-      setSession(response.data);
+      const response = await scrapingAPI.checkLogin(session.sessionId);
+      setSession(response.data.data);
     } catch (err) {
       console.error('Login failed:', err);
     } finally {
@@ -69,11 +66,11 @@ export const Sync: React.FC = () => {
     
     try {
       setLoading(true);
-      const response = await scrapingAPI.scrapeData(session.id, syncData.accountId);
-      setSession(response.data);
+      const response = await scrapingAPI.scrapeData(session.sessionId);
+      setSession(response.data.data);
       
       // Refresh accounts data after scraping
-      if (response.data.status === 'completed') {
+      if (response.data.data.status === 'completed') {
         await fetchAccounts();
       }
     } catch (err) {
@@ -87,7 +84,7 @@ export const Sync: React.FC = () => {
     if (!session) return;
     
     try {
-      await scrapingAPI.endSession(session.id);
+      await scrapingAPI.endSession(session.sessionId);
       setSession(null);
       setSyncData({
         broker: 'groww',

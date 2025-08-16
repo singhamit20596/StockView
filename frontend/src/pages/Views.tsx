@@ -33,8 +33,8 @@ export const Views: React.FC = () => {
         viewsAPI.getAll(),
         accountsAPI.getAll(),
       ]);
-      setViews(viewsResponse.data);
-      setAccounts(accountsResponse.data);
+      setViews(viewsResponse.data.data || []);
+      setAccounts(accountsResponse.data.data || []);
       setError(null);
     } catch (err) {
       setError('Failed to fetch data');
@@ -49,7 +49,7 @@ export const Views: React.FC = () => {
     
     try {
       const response = await viewsAPI.preview(formData.accountIds);
-      setPreviewData(response.data);
+      setPreviewData(response.data.data);
     } catch (err) {
       console.error('Preview error:', err);
     }

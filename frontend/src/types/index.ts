@@ -34,11 +34,16 @@ export interface View {
 }
 
 export interface ScrapingSession {
-  id: string;
+  sessionId: string;
   broker: string;
-  status: 'pending' | 'logging_in' | 'logged_in' | 'scraping' | 'completed' | 'error';
+  accountName?: string;
+  status: 'pending' | 'login_ready' | 'awaiting_login' | 'logging_in' | 'logged_in' | 'scraping' | 'scraping_completed' | 'completed' | 'error';
   message?: string;
   data?: any;
+  isLoggedIn?: boolean;
+  holdings?: any[];
+  totalHoldings?: number;
+  scrapedAt?: string;
 }
 
 export interface DashboardData {

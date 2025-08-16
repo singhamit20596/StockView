@@ -5,6 +5,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Accounts } from './pages/Accounts';
 import { Views } from './pages/Views';
 import { Sync } from './pages/Sync';
+import { InteractionTest } from './components/InteractionTest';
 import './App.css';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
           <Route path="views" element={<Views />} />
           <Route path="analytics" element={<div className="p-8 text-center">Analytics page coming soon...</div>} />
           <Route path="sync" element={<Sync />} />
+          <Route path="test" element={<InteractionTest />} />
         </Route>
       </Routes>
     </Router>

@@ -1,0 +1,584 @@
+import React, { useState } from 'react';
+import { Button, Card, LoadingSpinner } from '../UI';
+import { scrapingAPI, accountsAPI } from '../../services/api';
+import { ScrapingSession } from '../../types';
+import { ExclamationTriangleIcon, CheckCircleIcon, XMarkIcon } from '@heroicons/react/24/outline';
+
+interface CreateAccountWithScrapingProps {
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export const CreateAccountWithScraping: React.FC<CreateAccountWithScrapingProps> = ({
+  onClose,
+  onSuccess,
+}) => {
+  const [step, setStep] = useState<'form' | 'scraping' | 'completed' | 'error'>('form');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [session, setSession] = useState<ScrapingSession | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    broker: 'groww',
+  });
+
+  const handleStartScraping = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.name.trim()) {
+      setError('Account name is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setStep('scraping');
+
+      console.log('🚀 [DEBUG] Starting scraping session for account:', formData.name);
+      console.log('🚀 [DEBUG] Form data:', formData);
+      
+      // Initiate scraping session
+      const response = await scrapingAPI.initiate(formData.broker, formData.name);
+      const sessionData = response.data.data;
+      setSession(sessionData);
+
+      console.log('✅ [DEBUG] Scraping session created successfully:', sessionData);
+      console.log('✅ [DEBUG] Session ID:', sessionData.sessionId);
+      console.log('✅ [DEBUG] Initial status:', sessionData.status);
+
+      // Poll for completion
+      pollScrapingStatus(sessionData.sessionId);
+      
+    } catch (err: any) {
+      console.error('❌ [DEBUG] Failed to start scraping:', err);
+      console.error('❌ [DEBUG] Error details:', err.response?.data);
+      setError(err.response?.data?.error || 'Failed to start scraping session');
+      setStep('error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const pollScrapingStatus = async (sessionId: string) => {
+    console.log('📊 [DEBUG] ='.repeat(80));
+    console.log('📊 [DEBUG] STARTING POLLING FOR SESSION');
+    console.log('📊 [DEBUG] ='.repeat(80));
+    console.log('📊 [DEBUG] Session ID:', sessionId);
+    console.log('📊 [DEBUG] Polling interval: 3 seconds');
+    console.log('📊 [DEBUG] Timeout: 5 minutes');
+    
+    let pollCount = 0;
+    let lastStatus = '';
+    
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+      console.log(`📊 [DEBUG] Poll attempt #${pollCount} at ${new Date().toISOString()}`);
+      
+      try {
+        console.log('🔍 [DEBUG] Fetching session status...');
+        const response = await scrapingAPI.getSession(sessionId);
+        const sessionData = response.data.data;
+        setSession(sessionData);
+
+        console.log(`📊 [DEBUG] Session status: ${lastStatus} → ${sessionData.status}`);
+        
+        if (sessionData.status !== lastStatus) {
+          console.log(`📊 [DEBUG] Status changed! Full session data:`, JSON.stringify(sessionData, null, 2));
+          lastStatus = sessionData.status;
+        }
+
+        if (sessionData.status === 'login_ready') {
+          console.log('🔐 [DEBUG] Status is login_ready, checking login...');
+          // Check if user has logged in
+          checkLoginStatus(sessionId);
+        } else if (sessionData.status === 'logged_in') {
+          console.log('✅ [DEBUG] User has logged in! Starting scraping...');
+          // User has logged in, start scraping automatically
+          clearInterval(pollInterval);
+          console.log('✅ [DEBUG] Polling stopped, initiating scraping process...');
+          startScraping(sessionId);
+        } else if (sessionData.status === 'scraping_completed' || sessionData.status === 'completed') {
+          console.log('🎉 [DEBUG] Scraping completed successfully!');
+          console.log(`🎉 [DEBUG] Holdings found: ${sessionData.holdings?.length || 0}`);
+          
+          if (sessionData.holdings && sessionData.holdings.length > 0) {
+            console.log('🎉 [DEBUG] Sample scraped holdings:');
+            sessionData.holdings.slice(0, 5).forEach((holding, idx) => {
+              console.log(`🎉 [DEBUG] ${idx + 1}. ${holding.stockName}: ₹${holding.invested} → ₹${holding.current} (${holding['PnL%']}%)`);
+            });
+            
+            // Calculate and log totals
+            const totalInvested = sessionData.holdings.reduce((sum, h) => sum + h.invested, 0);
+            const totalCurrent = sessionData.holdings.reduce((sum, h) => sum + h.current, 0);
+            const totalPnL = totalCurrent - totalInvested;
+            
+            console.log('🎉 [DEBUG] Portfolio Summary:');
+            console.log(`🎉 [DEBUG] - Total Stocks: ${sessionData.holdings.length}`);
+            console.log(`🎉 [DEBUG] - Total Invested: ₹${totalInvested.toFixed(2)}`);
+            console.log(`🎉 [DEBUG] - Current Value: ₹${totalCurrent.toFixed(2)}`);
+            console.log(`🎉 [DEBUG] - Total P&L: ₹${totalPnL.toFixed(2)}`);
+          } else {
+            console.log('🎉 [DEBUG] ⚠️ No holdings found in completed session!');
+          }
+          
+          clearInterval(pollInterval);
+          console.log('🎉 [DEBUG] Polling stopped, creating account...');
+          setStep('completed');
+          
+          // Create account with scraped data
+          await createAccountFromScrapedData(sessionData);
+        } else if (sessionData.status === 'error' || sessionData.status === 'scraping_error') {
+          console.error('❌ [DEBUG] Scraping error detected!');
+          console.error('❌ [DEBUG] Error message:', sessionData.error || sessionData.message);
+          console.error('❌ [DEBUG] Full error data:', sessionData);
+          clearInterval(pollInterval);
+          setError(sessionData.error || sessionData.message || 'Scraping failed');
+          setStep('error');
+        } else {
+          console.log(`📊 [DEBUG] Session in progress. Status: ${sessionData.status}`);
+          if (sessionData.holdings) {
+            console.log(`📊 [DEBUG] Holdings so far: ${sessionData.holdings.length}`);
+          }
+        }
+      } catch (err: any) {
+        console.error(`❌ [DEBUG] Error in poll attempt #${pollCount}:`, err);
+        console.error('❌ [DEBUG] Error details:', err.response?.data);
+        console.error('❌ [DEBUG] Error stack:', err.stack);
+        
+        // Don't fail immediately, continue polling for a few more attempts
+        if (pollCount > 20) { // After 20 failed attempts (1 minute), give up
+          console.error('❌ [DEBUG] Too many failed polling attempts, stopping');
+          clearInterval(pollInterval);
+          setError('Failed to check scraping status');
+          setStep('error');
+        } else {
+          console.log(`📊 [DEBUG] Continuing to poll (${pollCount}/20 failed attempts)`);
+        }
+      }
+    }, 3000); // Poll every 3 seconds
+
+    // Stop polling after 5 minutes
+    setTimeout(() => {
+      console.log('⏰ [DEBUG] Polling timeout reached (5 minutes)');
+      console.log(`⏰ [DEBUG] Total poll attempts: ${pollCount}`);
+      console.log(`⏰ [DEBUG] Last known status: ${lastStatus}`);
+      clearInterval(pollInterval);
+      if (step === 'scraping') {
+        setError('Scraping session timed out');
+        setStep('error');
+      }
+    }, 300000);
+  };
+        clearInterval(pollInterval);
+        setError('Failed to check scraping status');
+        setStep('error');
+      }
+    }, 3000); // Poll every 3 seconds
+
+    // Stop polling after 5 minutes
+    setTimeout(() => {
+      console.log('⏰ [DEBUG] Polling timeout reached (5 minutes)');
+      clearInterval(pollInterval);
+      if (step === 'scraping') {
+        setError('Scraping session timed out');
+        setStep('error');
+      }
+    }, 300000);
+  };
+
+  const checkLoginStatus = async (sessionId: string) => {
+    try {
+      console.log('🔍 [DEBUG] Checking login status for session:', sessionId);
+      const response = await scrapingAPI.checkLogin(sessionId);
+      const sessionData = response.data.data;
+      setSession(sessionData);
+      
+      console.log('🔍 [DEBUG] Login check response:', sessionData);
+      console.log('🔍 [DEBUG] isLoggedIn:', sessionData.isLoggedIn);
+      
+      if (sessionData.isLoggedIn) {
+        console.log('✅ [DEBUG] User logged in confirmed, but not triggering scraping here - letting polling handle it');
+        // Don't start scraping here, let the polling handle it
+      } else {
+        console.log('🔐 [DEBUG] User not logged in yet, will continue polling');
+      }
+    } catch (err: any) {
+      console.error('❌ [DEBUG] Error checking login:', err);
+      console.error('❌ [DEBUG] Login check error details:', err.response?.data);
+      // Don't fail here, just continue polling
+    }
+  };
+
+  const startScraping = async (sessionId: string) => {
+    try {
+      console.log('📊 [DEBUG] Starting scraping process for session:', sessionId);
+      const response = await scrapingAPI.scrapeData(sessionId);
+      const sessionData = response.data.data;
+      setSession(sessionData);
+      
+      console.log('📊 [DEBUG] Scraping response:', sessionData);
+      console.log('📊 [DEBUG] Scraping status:', sessionData.status);
+      
+      if (sessionData.status === 'scraping_completed') {
+        console.log('🎉 [DEBUG] Scraping completed immediately!');
+        setStep('completed');
+        await createAccountFromScrapedData(sessionData);
+      } else {
+        console.log('📊 [DEBUG] Scraping in progress, status:', sessionData.status);
+      }
+    } catch (err: any) {
+      console.error('❌ [DEBUG] Error starting scraping:', err);
+      console.error('❌ [DEBUG] Scraping error details:', err.response?.data);
+      setError('Failed to start data scraping');
+      setStep('error');
+    }
+  };
+
+  const createAccountFromScrapedData = async (sessionData: ScrapingSession) => {
+    console.log('🏦 [DEBUG] ='.repeat(80));
+    console.log('🏦 [DEBUG] CREATING ACCOUNT FROM SCRAPED DATA');
+    console.log('🏦 [DEBUG] ='.repeat(80));
+    
+    try {
+      console.log('🏦 [DEBUG] Input session data:', JSON.stringify(sessionData, null, 2));
+      console.log('🏦 [DEBUG] Holdings count:', sessionData.holdings?.length || 0);
+      
+      if (sessionData.holdings && sessionData.holdings.length > 0) {
+        console.log('🏦 [DEBUG] First few holdings:');
+        sessionData.holdings.slice(0, 3).forEach((holding, idx) => {
+          console.log(`🏦 [DEBUG] ${idx + 1}. ${holding.stockName}: ₹${holding.invested} → ₹${holding.current} (${holding['PnL%']}%)`);
+        });
+        
+        // Calculate totals for verification
+        const totalInvested = sessionData.holdings.reduce((sum, h) => sum + h.invested, 0);
+        const totalCurrent = sessionData.holdings.reduce((sum, h) => sum + h.current, 0);
+        const totalPnL = totalCurrent - totalInvested;
+        
+        console.log('🏦 [DEBUG] Portfolio totals:');
+        console.log(`🏦 [DEBUG] - Total Invested: ₹${totalInvested.toFixed(2)}`);
+        console.log(`🏦 [DEBUG] - Current Value: ₹${totalCurrent.toFixed(2)}`);
+        console.log(`🏦 [DEBUG] - Total P&L: ₹${totalPnL.toFixed(2)}`);
+        console.log(`🏦 [DEBUG] - P&L %: ${totalInvested > 0 ? ((totalPnL / totalInvested) * 100).toFixed(2) : 0}%`);
+      } else {
+        console.log('🏦 [DEBUG] ⚠️ No holdings found in session data');
+      }
+      
+      console.log('🏦 [DEBUG] Account creation logic:');
+      console.log('🏦 [DEBUG] - Account Name:', formData.name);
+      console.log('🏦 [DEBUG] - Broker:', formData.broker);
+      console.log('🏦 [DEBUG] - Session ID:', sessionData.sessionId);
+      
+      // Account creation will be handled by the backend during scraping
+      // The backend should automatically create/update the account when scraping completes
+      console.log('🏦 [DEBUG] ✅ Account data processed successfully');
+      console.log('🏦 [DEBUG] Triggering success callback...');
+      
+      onSuccess();
+      
+    } catch (err: any) {
+      console.error('🏦 [DEBUG] ❌ Failed to create account:', err);
+      console.error('🏦 [DEBUG] Error details:', err.response?.data);
+      console.error('🏦 [DEBUG] Error stack:', err.stack);
+      setError('Failed to create account with scraped data');
+      setStep('error');
+    } finally {
+      console.log('🏦 [DEBUG] ='.repeat(80));
+    }
+  };
+
+  const handleCancel = async () => {
+    if (session) {
+      try {
+        await scrapingAPI.endSession(session.sessionId);
+      } catch (err) {
+        console.error('Failed to end session:', err);
+      }
+    }
+    onClose();
+  };
+
+  const renderStepContent = () => {
+    switch (step) {
+      case 'form':
+        return (
+          <form onSubmit={handleStartScraping} className="space-y-4">
+            <div>
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                Account Name
+              </label>
+              <input
+                type="text"
+                id="name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                placeholder="e.g., My Primary Account"
+                required
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                This will be used to identify your account in StockView
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="broker" className="block text-sm font-medium text-gray-700">
+                Broker
+              </label>
+              <select
+                id="broker"
+                value={formData.broker}
+                onChange={(e) => setFormData({ ...formData, broker: e.target.value })}
+                className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              >
+                <option value="groww">Groww</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Currently only Groww is supported
+              </p>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                <div className="flex">
+                  <ExclamationTriangleIcon className="h-5 w-5 text-red-400" />
+                  <div className="ml-3">
+                    <p className="text-sm text-red-600">{error}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+              <div className="flex">
+                <div className="ml-3">
+                  <h4 className="text-sm font-medium text-blue-800">What happens next?</h4>
+                  <p className="mt-1 text-xs text-blue-600">
+                    1. We'll open Groww in a new browser window<br />
+                    2. Login with your Groww credentials<br />
+                    3. We'll automatically import your holdings<br />
+                    4. Your account will be created with real portfolio data
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex space-x-3">
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Starting...' : 'Create Account with Data Import'}
+              </Button>
+              <Button type="button" variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        );
+
+      case 'scraping':
+        return (
+          <div className="text-center space-y-4">
+            <LoadingSpinner size="lg" />
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Importing Your Portfolio Data</h3>
+              <p className="mt-2 text-gray-600">
+                {session?.status === 'login_ready' && 'Please login to Groww in the browser window that opened.'}
+                {session?.status === 'awaiting_login' && 'Waiting for you to complete login...'}
+                {session?.status === 'logged_in' && 'Login successful! Starting data import...'}
+                {session?.status === 'scraping' && 'Importing your holdings data...'}
+                {!session?.status && 'Initializing...'}
+              </p>
+              <p className="mt-1 text-sm text-gray-500">
+                Status: {session?.status || 'Initializing...'}
+              </p>
+            </div>
+            
+            {(session?.status === 'login_ready' || session?.status === 'awaiting_login') && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                <p className="text-sm text-yellow-700">
+                  🔐 Please complete your login in the browser window
+                </p>
+              </div>
+            )}
+            
+            {session?.status === 'logged_in' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                <p className="text-sm text-blue-700">
+                  ✅ Login successful! Automatically navigating to holdings page...
+                </p>
+              </div>
+            )}
+            
+            {session?.status === 'scraping' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                <p className="text-sm text-blue-700">
+                  📊 Importing your holdings data...
+                </p>
+              </div>
+            )}
+
+            <Button variant="secondary" onClick={handleCancel}>
+              Cancel Import
+            </Button>
+
+            {/* Debug Panel */}
+            <div className="mt-6 bg-gray-100 rounded-lg p-4 text-left">
+              <h4 className="text-sm font-medium text-gray-900 mb-2">🔧 Debug Info</h4>
+              <div className="text-xs text-gray-600 space-y-1">
+                <div><strong>Session ID:</strong> {session?.sessionId || 'None'}</div>
+                <div><strong>Status:</strong> {session?.status || 'None'}</div>
+                <div><strong>Broker:</strong> {session?.broker || 'None'}</div>
+                <div><strong>Account Name:</strong> {session?.accountName || formData.name}</div>
+                <div><strong>Is Logged In:</strong> {session?.isLoggedIn ? 'Yes' : 'No'}</div>
+                <div><strong>Message:</strong> {session?.message || 'None'}</div>
+                {session?.holdings && (
+                  <div><strong>Holdings Found:</strong> {session.holdings.length}</div>
+                )}
+              </div>
+              
+              {/* Manual Debug Actions */}
+              {session?.sessionId && (
+                <div className="mt-3 space-x-2">
+                  <button
+                    onClick={() => checkLoginStatus(session.sessionId)}
+                    className="px-2 py-1 text-xs bg-blue-500 text-white rounded"
+                  >
+                    Manual Login Check
+                  </button>
+                  {session.status === 'logged_in' && (
+                    <button
+                      onClick={() => startScraping(session.sessionId)}
+                      className="px-2 py-1 text-xs bg-green-500 text-white rounded"
+                    >
+                      Manual Start Scraping
+                    </button>
+                  )}
+                </div>
+              )}
+              
+              <div className="mt-2 text-xs text-gray-500">
+                Check browser console for detailed logs
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'completed':
+        return (
+          <div className="space-y-6">
+            <div className="text-center">
+              <CheckCircleIcon className="mx-auto h-12 w-12 text-green-500" />
+              <h3 className="text-lg font-medium text-gray-900 mt-4">
+                Account Created Successfully!
+              </h3>
+              <p className="mt-2 text-gray-600">
+                Your account "{formData.name}" has been created with imported portfolio data.
+              </p>
+              {session?.totalHoldings && (
+                <p className="text-sm text-gray-500 mt-1">
+                  {session.totalHoldings} holdings imported from Groww
+                </p>
+              )}
+            </div>
+
+            {/* Display scraped holdings */}
+            {session?.holdings && session.holdings.length > 0 && (
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="text-md font-medium text-gray-900 mb-3">
+                  Imported Holdings
+                </h4>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Stock
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Quantity
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Avg Price
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Current Price
+                        </th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          P&L
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {session.holdings.slice(0, 5).map((holding: any, index: number) => (
+                        <tr key={index}>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {holding.stockName || holding.name || 'Unknown'}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                            {holding.quantity || holding.qty || '-'}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                            ₹{holding.avgPrice || holding.averagePrice || '-'}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                            ₹{holding.currentPrice || holding.ltp || '-'}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm">
+                            <span className={`${
+                              (holding.pnl || holding.totalPnL || 0) >= 0 
+                                ? 'text-green-600' 
+                                : 'text-red-600'
+                            }`}>
+                              ₹{holding.pnl || holding.totalPnL || '-'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {session.holdings.length > 5 && (
+                    <p className="text-xs text-gray-500 mt-2 text-center">
+                      Showing 5 of {session.holdings.length} holdings
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="text-center">
+              <Button onClick={onSuccess}>
+                View Accounts
+              </Button>
+            </div>
+          </div>
+        );
+
+      case 'error':
+        return (
+          <div className="text-center space-y-4">
+            <XMarkIcon className="mx-auto h-12 w-12 text-red-500" />
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Import Failed</h3>
+              <p className="mt-2 text-gray-600">{error}</p>
+            </div>
+            <div className="flex space-x-3 justify-center">
+              <Button onClick={() => { setStep('form'); setError(null); }}>
+                Try Again
+              </Button>
+              <Button variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <Card title="Create New Account">
+      {renderStepContent()}
+    </Card>
+  );
+};
